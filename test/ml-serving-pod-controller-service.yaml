@@ -1,0 +1,15 @@
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: ml-serving-pod-controller-service
+spec:
+  selector:
+    app: ml-serving-pod-controller-server
+  ports:
+    - protocol: TCP
+      port: 81  # 服務的 Port
+      targetPort: 8001  # 轉發到 Container 內部的 Port
+      nodePort: 30081  # 讓外部可以透過這個 Port 存取
+  type: NodePort  # 讓外部可以透過 <minikube-ip>:30081 訪問
+
