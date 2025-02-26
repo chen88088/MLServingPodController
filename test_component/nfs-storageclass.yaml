@@ -1,0 +1,12 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-storage
+provisioner: nfs-provisioner
+reclaimPolicy: Delete
+mountOptions:
+  - hard
+  - nfsvers=4.1
+parameters:
+  server: 10.52.52.142   # NFS Server 的 IP 地址
+  path: /mnt/nfs_share

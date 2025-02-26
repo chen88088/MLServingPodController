@@ -12,8 +12,8 @@ COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 暴露 8000 Port（這樣 Kubernetes Service 可以對外暴露）
-EXPOSE 8001
+EXPOSE 8002
 
 # 指定容器啟動時的執行命令
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8002"]

@@ -1,7 +1,8 @@
 import requests
 import uuid
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from kubernetes import client, config
+import os
 
 app = FastAPI()
 
@@ -18,20 +19,56 @@ def health_check():
 # 允許自己接收 API，創建新的 Task Pod
 @app.post("/create_new_pod")
 def create_new_pod():
+
+     # 讀取自身環境變量中的 PVC 名稱
+    pvc_name = os.getenv("PVC_NAME")
+    if not pvc_name:
+        raise HTTPException(status_code=500, detail="PVC_NAME not set in environment variables")
+
     pod_name = f"task-pod-{uuid.uuid4().hex[:6]}"
     pod_manifest = {
         "apiVersion": "v1",
         "kind": "Pod",
-        "metadata": {"name": pod_name, "labels": {"app": "ml-serving"}},
+        "metadata": {
+            "name": pod_name, 
+            "namespace": "ml-serving",
+            "labels": {
+                "app": "task-pod",
+                "type": "gpu"
+            }
+        },
         "spec": {
+            # "serviceAccountName": "ml-serving-sa",
+            "nodeSelector": {
+                "gpu-node": "true"
+            },
             "containers": [
                 {
-                    "name": "ml-serving-container",
-                    "image": "192.168.158.43:80/library/task-pod:latest",
-                    "ports": [{"containerPort": 8001}]
+                    "name": "task-container",
+                    "image": "harbor.pdc.tw/moa_ncu/task-pod:latest",
+                    "ports": [{"containerPort": 8002}],
+                    "volumeMounts": [
+                        {
+                            "name": "shared-storage",
+                            "mountPath": "/mnt/storage"
+                        }
+                    ],
+                    "resources": {
+                        "limits": {
+                            "nvidia.com/gpu": "1"  # 限制 GPU 使用量
+                        }
+                    }
+                }
+            ],
+            "volumes": [
+                {
+                    "name": "shared-storage",
+                    "persistentVolumeClaim": {
+                        "claimName": pvc_name
+                    }
                 }
             ]
         }
     }
-    v1.create_namespaced_pod(namespace="default", body=pod_manifest)
+    v1.create_namespaced_pod(namespace="ml-serving", body=pod_manifest)
     return {"message": "New ml-serving Pod created", "pod_name": pod_name}
