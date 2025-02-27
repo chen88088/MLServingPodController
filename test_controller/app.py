@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 import os
 from kubernetes import client, config
 import uuid
+import time
 
 def load_k8s_config():
     """ 自動偵測 Kubernetes 環境，選擇合適的 config """
@@ -29,8 +30,19 @@ def health_check():
     return {"status": "CONTROLLER SERVER is running!!!!!"}
 
 # 創建 Pod
-@app.post("/create_pod")
-def create_pod():
+@app.post("/create_pod/{ml_serving_pod_server_image_name}")
+def create_pod(ml_serving_pod_server_image_name: str):
+    
+
+    # 確認 Image Name 格式
+    if not ml_serving_pod_server_image_name:
+        raise HTTPException(status_code=400, detail="Image Name is required.")
+    if "/" in ml_serving_pod_server_image_name or ":" in ml_serving_pod_server_image_name:
+        raise HTTPException(status_code=400, detail="Invalid Image Name.")
+    
+    # 拼接 Image 完整名稱
+    full_image_name = f"harbor.pdc.tw/moa_ncu/{ml_serving_pod_server_image_name}:latest"
+
     pod_name = f"ml-serving-{uuid.uuid4().hex[:6]}"  # 生成隨機 Pod 名稱
     # 1. 動態生成 PVC
     pvc_name = f"{pod_name}-pvc"
@@ -54,6 +66,7 @@ def create_pod():
 
     v1.create_namespaced_persistent_volume_claim(namespace="ml-serving", body=pvc_manifest)
 
+
     # 2. 生成 Pod
     pod_manifest = {
         "apiVersion": "v1",
@@ -70,12 +83,21 @@ def create_pod():
             "containers": [
                 {
                     "name": "ml-serving-container",
-                    "image": "harbor.pdc.tw/moa_ncu/ml-serving-pod:latest",
+                    "image": full_image_name,
                     "ports": [{"containerPort": 8001}],  # 這裡假設 ML Server 跑在 8001Port
                      "env": [  # 傳遞 PVC 名稱，讓 ml-serving Pod 知道要共用的 PVC
                         {
                             "name": "PVC_NAME",
                             "value": pvc_name
+                        },
+                        {
+                            "name": "GITHUB_TOKEN",
+                            "valueFrom": {
+                                "secretKeyRef": {
+                                    "name": "github-token",
+                                    "key": "GITHUB_TOKEN"
+                                }
+                            }
                         }
                     ],
                     "volumeMounts": [
@@ -93,10 +115,36 @@ def create_pod():
                         "claimName": pvc_name
                     }
                 }
+            ],
+            # 加入這行，指定 Image Pull Secret
+            "imagePullSecrets": [
+                {
+                    "name": "harbor-secret"  # 與 harbor-secret.yaml 中的 name 相同
+                }
             ]
         }
     }
     v1.create_namespaced_pod(namespace="ml-serving", body=pod_manifest)
+
+    # 等待 Pod 啟動，最多嘗試 30 次 (約 60 秒)
+    pod_ip = None
+    for _ in range(30):
+        pod_info = v1.read_namespaced_pod(name=pod_name, namespace="ml-serving")
+        if pod_info.status.phase == "Running":
+            pod_ip = pod_info.status.pod_ip
+            break
+        time.sleep(2)  # 每次等待 2 秒
+
+    if not pod_ip:
+        raise HTTPException(status_code=500, detail="Pod did not reach Running state in time.")
+
+    return {
+        "message": "Pod created",
+        "pod_name": pod_name,
+        "image": full_image_name,
+        "pod_ip": pod_ip
+    }
+
     return {"message": "Pod created", "pod_name": pod_name}
 
 # 刪除 Pod
