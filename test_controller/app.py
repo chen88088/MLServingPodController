@@ -145,7 +145,6 @@ def create_pod(ml_serving_pod_server_image_name: str):
         "pod_ip": pod_ip
     }
 
-    return {"message": "Pod created", "pod_name": pod_name}
 
 # 刪除 Pod
 @app.delete("/delete_pod/{pod_name}")

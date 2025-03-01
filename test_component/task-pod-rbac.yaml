@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: task-pod-sa
+  namespace: ml-serving
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: ml-serving
+  name: task-pod-role
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: task-pod-rolebinding
+  namespace: ml-serving
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: task-pod-role
+subjects:
+- kind: ServiceAccount
+  name: task-pod-sa
+  namespace: ml-serving

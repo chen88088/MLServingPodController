@@ -10,15 +10,25 @@ metadata:
   name: ml-serving-role
   namespace: ml-serving
 rules:
+  # Pods 與 PVC 的管理權限
   - apiGroups: [""]
     resources: ["pods", "pods/log", "persistentvolumeclaims", "persistentvolumes"]
     verbs: ["get", "list", "watch", "create", "delete"]
+
+  # Services 的管理權限
   - apiGroups: [""] 
     resources: ["services"]
     verbs: ["get", "list", "create", "delete"]
+
+  # StorageClass 的管理權限
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
     verbs: ["get", "list"]
+
+  # **新增對 `jobs.batch` 的管理權限**
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
