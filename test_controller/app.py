@@ -98,7 +98,11 @@ def create_pod(ml_serving_pod_server_image_name: str):
                                     "key": "GITHUB_TOKEN"
                                 }
                             }
-                        }
+                        },
+                        {"name": "MLFLOW_TRACKING_URI", "valueFrom": {"configMapKeyRef": {"name": "mlflow-config", "key": "MLFLOW_TRACKING_URI"}}},
+                        {"name": "MLFLOW_S3_ENDPOINT_URL", "valueFrom": {"configMapKeyRef": {"name": "mlflow-config", "key": "MLFLOW_S3_ENDPOINT_URL"}}},
+                        {"name": "AWS_ACCESS_KEY_ID", "valueFrom": {"secretKeyRef": {"name": "mlflow-secret", "key": "AWS_ACCESS_KEY_ID"}}},
+                        {"name": "AWS_SECRET_ACCESS_KEY", "valueFrom": {"secretKeyRef": {"name": "mlflow-secret", "key": "AWS_SECRET_ACCESS_KEY"}}}
                     ],
                     "volumeMounts": [
                         {

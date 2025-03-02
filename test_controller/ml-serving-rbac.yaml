@@ -27,7 +27,7 @@ rules:
 
   # **新增對 `jobs.batch` 的管理權限**
   - apiGroups: ["batch"]
-    resources: ["jobs"]
+    resources: ["jobs", "jobs/status"]
     verbs: ["get", "list", "watch", "create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
