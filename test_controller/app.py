@@ -47,7 +47,7 @@ def create_pod(ml_serving_pod_server_image_name: str, image_tag:str,export_port:
     # 拼接 Image 完整名稱
     full_image_name = f"harbor.pdc.tw/moa_ncu/{ml_serving_pod_server_image_name}:{image_tag}"
 
-    print("🚀 Image used for deployment:", full_image_name)
+    print("Image used for deployment:", full_image_name)
 
     pod_name = f"ml-serving-{ml_serving_pod_server_image_name}-{uuid.uuid4().hex[:6]}"  # 生成隨機 Pod 名稱
     # 1. 動態生成 PVC
