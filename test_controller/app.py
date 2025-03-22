@@ -31,7 +31,8 @@ def health_check():
 
 # 創建 Pod
 @app.post("/create_pod/{ml_serving_pod_server_image_name}")
-def create_pod(ml_serving_pod_server_image_name: str):
+def create_pod(ml_serving_pod_server_image_name: str, image_tag:str,export_port:int):
+    
     
 
     # 確認 Image Name 格式
@@ -40,10 +41,15 @@ def create_pod(ml_serving_pod_server_image_name: str):
     if "/" in ml_serving_pod_server_image_name or ":" in ml_serving_pod_server_image_name:
         raise HTTPException(status_code=400, detail="Invalid Image Name.")
     
+    export_port = export_port
+    image_tag = image_tag
+    
     # 拼接 Image 完整名稱
-    full_image_name = f"harbor.pdc.tw/moa_ncu/{ml_serving_pod_server_image_name}:latest"
+    full_image_name = f"harbor.pdc.tw/moa_ncu/{ml_serving_pod_server_image_name}:{image_tag}"
 
-    pod_name = f"ml-serving-{uuid.uuid4().hex[:6]}"  # 生成隨機 Pod 名稱
+    print("🚀 Image used for deployment:", full_image_name)
+
+    pod_name = f"ml-serving-{ml_serving_pod_server_image_name}-{uuid.uuid4().hex[:6]}"  # 生成隨機 Pod 名稱
     # 1. 動態生成 PVC
     pvc_name = f"{pod_name}-pvc"
     pvc_manifest = {
@@ -84,7 +90,8 @@ def create_pod(ml_serving_pod_server_image_name: str):
                 {
                     "name": "ml-serving-container",
                     "image": full_image_name,
-                    "ports": [{"containerPort": 8001}],  # 這裡假設 ML Server 跑在 8001Port
+                    "imagePullPolicy": "Always",
+                    "ports": [{"containerPort": export_port}],  # 這裡假設 ML Server 跑在 export_port
                      "env": [  # 傳遞 PVC 名稱，讓 ml-serving Pod 知道要共用的 PVC
                         {
                             "name": "PVC_NAME",

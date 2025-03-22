@@ -20,7 +20,7 @@ def allocate_preprocessing_server(dag_id: str, execution_id: str):
     DAG 來請求 Preprocessing Server：
     1. 查詢 Consul 獲取所有可用的機器
     2. 確保機器未被其他 DAG 鎖定
-    3. 若可用，則鎖定機器並回傳 IP、Port、Execution ID
+    3. 若可用，則鎖定機器(through resdis)並 回傳 IP、Port、Execution ID
     """
     dag_unique_id = f"{dag_id}_{execution_id}"
 
@@ -45,7 +45,7 @@ def allocate_preprocessing_server(dag_id: str, execution_id: str):
         if locked_dag:
             continue  # 跳過這台機器，因為它已被鎖定
 
-        # 3️⃣ 鎖定該機器
+        # 3️⃣ 鎖定該機器 && return sever info
         redis_lock.setex(f"locked_dag_{machine_id}", 3600, dag_unique_id)  # 設定 TTL 1 小時
 
         return {
