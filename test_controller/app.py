@@ -7,7 +7,7 @@ import redis
 import json
 from datetime import datetime
 import requests
-
+from pydantic import BaseModel
 
 
 def load_k8s_config():
@@ -41,24 +41,26 @@ redis_lock = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, decode_response
 CONSUL_HOST = "http://localhost:8500"
 SERVICE_NAME = "preprocessing"
 
+class PodCreateRequest(BaseModel):
+    image_tag: str
+    export_port: int
+
 @app.get("/health")
 def health_check():
     return {"status": "CONTROLLER SERVER is running!!!!!"}
 
 # 創建 Pod
 @app.post("/create_pod/{ml_serving_pod_server_image_name}")
-def create_pod(ml_serving_pod_server_image_name: str, image_tag:str,export_port:int):
+def create_pod(ml_serving_pod_server_image_name: str, request: PodCreateRequest):
     
-    
+    image_tag = request.image_tag
+    export_port = request.export_port
 
     # 確認 Image Name 格式
     if not ml_serving_pod_server_image_name:
         raise HTTPException(status_code=400, detail="Image Name is required.")
     if "/" in ml_serving_pod_server_image_name or ":" in ml_serving_pod_server_image_name:
         raise HTTPException(status_code=400, detail="Invalid Image Name.")
-    
-    export_port = export_port
-    image_tag = image_tag
     
     # 拼接 Image 完整名稱
     full_image_name = f"harbor.pdc.tw/moa_ncu/{ml_serving_pod_server_image_name}:{image_tag}"
@@ -97,7 +99,7 @@ def create_pod(ml_serving_pod_server_image_name: str, image_tag:str,export_port:
             "name": pod_name, 
             "namespace": "ml-serving",
             "labels": {
-                "app": "ml-serving"
+                "app": pod_name  
             }
         },
         "spec": {
@@ -107,7 +109,7 @@ def create_pod(ml_serving_pod_server_image_name: str, image_tag:str,export_port:
                     "name": "ml-serving-container",
                     "image": full_image_name,
                     "imagePullPolicy": "Always",
-                    "ports": [{"containerPort": export_port}],  # 這裡假設 ML Server 跑在 export_port
+                    "ports": [{"name": "http", "containerPort": export_port}],  # 這裡假設 ML Server 跑在 export_port
                      "env": [  # 傳遞 PVC 名稱，讓 ml-serving Pod 知道要共用的 PVC
                         {
                             "name": "PVC_NAME",
@@ -151,6 +153,8 @@ def create_pod(ml_serving_pod_server_image_name: str, image_tag:str,export_port:
             ]
         }
     }
+    print("==== Pod Manifest ====")
+    print(json.dumps(pod_manifest, indent=2))
     v1.create_namespaced_pod(namespace="ml-serving", body=pod_manifest)
 
     # 等待 Pod 啟動，最多嘗試 30 次 (約 60 秒)
@@ -164,12 +168,50 @@ def create_pod(ml_serving_pod_server_image_name: str, image_tag:str,export_port:
 
     if not pod_ip:
         raise HTTPException(status_code=500, detail="Pod did not reach Running state in time.")
+    
+    # 3.  create svc
+    service_name = f"{pod_name}-svc"
+    service_manifest = {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+            "name": service_name,
+            "namespace": "ml-serving"
+        },
+        "spec": {
+            "selector": {
+                "app": pod_name  
+            },
+            "ports": [
+                {
+                    "protocol": "TCP",
+                    "port": export_port,
+                    "targetPort": "http"
+                }
+            ]
+        }
+    }
+    print("==== Service Manifest ====")
+    print(json.dumps(service_manifest, indent=2))
+
+    # 確保 containerPorts fully visible
+    for _ in range(10):
+        pod_desc = v1.read_namespaced_pod(name=pod_name, namespace="ml-serving")
+        ports = pod_desc.spec.containers[0].ports
+        if ports and ports[0].container_port == export_port:
+            break
+        time.sleep(2)
+    else:
+        raise HTTPException(status_code=500, detail="Pod container port not ready for service binding.")
+
+    v1.create_namespaced_service(namespace="ml-serving", body=service_manifest)
 
     return {
         "message": "Pod created",
         "pod_name": pod_name,
         "image": full_image_name,
-        "pod_ip": pod_ip
+        "pod_ip": pod_ip,
+        "pod_service": f"{service_name}.ml-serving.svc.cluster.local"
     }
 
 
@@ -185,8 +227,17 @@ def delete_pod(pod_name: str):
         
         # 刪除 PVC（自動刪除對應 PV）
         v1.delete_namespaced_persistent_volume_claim(name=pvc_name, namespace="ml-serving")
+
+        # 刪除 Service（如果有的話）
+        service_name = f"{pod_name}-svc"
+        try:
+            v1.delete_namespaced_service(name=service_name, namespace="ml-serving")
+        except client.exceptions.ApiException as e:
+            # 如果找不到 service 就略過，但紀錄 log
+            if e.status != 404:
+                raise
         
-        return {"message": "Pod and PVC deleted", "pod_name": pod_name, "pvc_name": pvc_name}
+        return {"message": "Pod ,SVC and PVC deleted", "pod_name": pod_name, "pvc_name": pvc_name, "service_name": service_name}
     except client.exceptions.ApiException as e:
         raise HTTPException(status_code=400, detail=f"Failed to delete pod or pvc: {e}")
 
@@ -198,8 +249,9 @@ def list_pods():
     pod_names = [pod.metadata.name for pod in pods.items]
     return {"pods": pod_names}
 
+##############################################################
 
-
+# Allocate External Service
 @app.post("/allocate_service/{service_name}")
 async def allocate__service(dag_id: str, execution_id: str, service_name:str):
     """
@@ -245,7 +297,7 @@ async def allocate__service(dag_id: str, execution_id: str, service_name:str):
 
     raise HTTPException(status_code=404, detail="所有 Preprocessing Server 皆被鎖定，請稍後重試")
 
-
+# Release External Service
 @app.post("/release_service")
 async def release_service(dag_id: str, execution_id: str, assigned_service_instance_id: str):
     """
