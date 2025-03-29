@@ -34,16 +34,20 @@ v1 = client.CoreV1Api()
 
 
 # Redis 用來實現機器 Lock
-REDIS_HOST = "localhost"
+REDIS_HOST = "redis.redis.svc.cluster.local"
 REDIS_PORT = 6379
 redis_lock = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, decode_responses=True)
 
-CONSUL_HOST = "http://localhost:8500"
-SERVICE_NAME = "preprocessing"
+CONSUL_HOST = "http://consul-consul-server.consul.svc.cluster.local:8500"
+
 
 class PodCreateRequest(BaseModel):
     image_tag: str
     export_port: int
+
+class AllocateExternalServiceRequest(BaseModel):
+    dag_id: str
+    execution_id: str
 
 @app.get("/health")
 def health_check():
@@ -253,13 +257,22 @@ def list_pods():
 
 # Allocate External Service
 @app.post("/allocate_service/{service_name}")
-async def allocate__service(dag_id: str, execution_id: str, service_name:str):
+async def allocate__service(service_name:str, request: AllocateExternalServiceRequest):
     """
     DAG 來請求 Server：
     1. 查詢 Consul 獲取所有可用的機器
     2. 確保機器未被其他 DAG 鎖定
     3. 若可用，則鎖定機器(through resdis)並 回傳 IP、Port、Execution ID
     """
+    
+    
+    dag_id = request.dag_id
+    execution_id = request.execution_id
+
+    # 確認 Image Name 格式
+    if not (dag_id and execution_id ):
+        raise HTTPException(status_code=400, detail="Dag id nd Execution_id required.")
+
     dag_unique_id = f"{dag_id}_{execution_id}"
 
     service_name = service_name
@@ -298,11 +311,18 @@ async def allocate__service(dag_id: str, execution_id: str, service_name:str):
     raise HTTPException(status_code=404, detail="所有 Preprocessing Server 皆被鎖定，請稍後重試")
 
 # Release External Service
-@app.post("/release_service")
-async def release_service(dag_id: str, execution_id: str, assigned_service_instance_id: str):
+@app.post("/release_service/{assigned_service_instance_id}")
+async def release_service(assigned_service_instance_id: str, request: AllocateExternalServiceRequest):
     """
     DAG 完成後，釋放  Server
     """
+    dag_id = request.dag_id
+    execution_id = request.execution_id
+
+    # 確認 Image Name 格式
+    if not (dag_id and execution_id ):
+        raise HTTPException(status_code=400, detail="Dag id nd Execution_id required.")
+
     dag_unique_id = f"{dag_id}_{execution_id}"
     locked_dag = redis_lock.get(f"locked_dag_{assigned_service_instance_id}")
 
