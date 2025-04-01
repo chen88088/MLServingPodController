@@ -9,7 +9,7 @@ from datetime import datetime
 import requests
 from pydantic import BaseModel
 import re
-
+import hashlib
 def load_k8s_config():
     """ 自動偵測 Kubernetes 環境，選擇合適的 config """
     try:
@@ -31,6 +31,23 @@ def sanitize_k8s_name(name: str) -> str:
     name = re.sub(r"[^a-z0-9-]+", "", name.lower())
     name = re.sub(r"-+", "-", name).strip("-")  # 避免多個 dash 或首尾 dash
     return name
+
+def generate_safe_name(base_name: str, prefix: str, suffix: str = "", rand_len: int = 6, max_len: int = 63):
+    """
+    安全產生 pod/service name，避免超過 63 字元
+    base_name: 來源名稱（如 image）
+    prefix/suffix: 前綴/後綴字串
+    """
+    base = base_name.split("/")[-1].replace("_", "-").replace(".", "-")
+    rand_str = uuid.uuid4().hex[:rand_len]
+    hash_part = hashlib.sha1(base.encode()).hexdigest()[:6]
+
+    # 預估長度
+    fixed_len = len(prefix) + len(suffix) + len(rand_str) + len(hash_part) + 4  # 多 4 個 "-"
+    max_base_len = max_len - fixed_len
+    short_base = base[:max_base_len]
+
+    return f"{prefix}-{short_base}-{hash_part}-{rand_str}{('-' + suffix) if suffix else ''}"
 
 app = FastAPI()
 
@@ -85,6 +102,10 @@ def create_pod(request: PodCreateRequest):
 
     # 生成合法的 Pod 名稱
     pod_name = f"ml-serving-{ml_serving_pod_name}-{uuid.uuid4().hex[:6]}"  # 生成隨機 Pod 名稱
+    
+    # 安全生成 pod 名稱
+    pod_name = generate_safe_name(image_name, prefix="mlpod")
+
     # 1. 動態生成 PVC
     pvc_name = f"{pod_name}-pvc"
     pvc_manifest = {
@@ -187,7 +208,7 @@ def create_pod(request: PodCreateRequest):
         raise HTTPException(status_code=500, detail="Pod did not reach Running state in time.")
     
     # 3.  create svc
-    service_name = f"{pod_name}-svc"
+    service_name = generate_safe_name(image_name, prefix="mlsvc")
     service_manifest = {
         "apiVersion": "v1",
         "kind": "Service",
