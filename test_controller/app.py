@@ -8,7 +8,7 @@ import json
 from datetime import datetime
 import requests
 from pydantic import BaseModel
-
+import re
 
 def load_k8s_config():
     """ 自動偵測 Kubernetes 環境，選擇合適的 config """
@@ -24,6 +24,13 @@ def load_k8s_config():
     except config.ConfigException as e:
         print(f"❌ Failed to load Kubernetes config: {e}")
 
+
+def sanitize_k8s_name(name: str) -> str:
+    # 將 `/`, `_` 轉成 `-`，再移除其他不合法字元
+    name = name.replace("/", "-").replace("_", "-")
+    name = re.sub(r"[^a-z0-9-]+", "", name.lower())
+    name = re.sub(r"-+", "-", name).strip("-")  # 避免多個 dash 或首尾 dash
+    return name
 
 app = FastAPI()
 
@@ -42,6 +49,7 @@ CONSUL_HOST = "http://consul-consul-server.consul.svc.cluster.local:8500"
 
 
 class PodCreateRequest(BaseModel):
+    image_name: str
     image_tag: str
     export_port: int
 
@@ -54,24 +62,29 @@ def health_check():
     return {"status": "CONTROLLER SERVER is running!!!!!"}
 
 # 創建 Pod
-@app.post("/create_pod/{ml_serving_pod_server_image_name}")
-def create_pod(ml_serving_pod_server_image_name: str, request: PodCreateRequest):
+@app.post("/create_pod")
+def create_pod(request: PodCreateRequest):
     
+    image_name= request.image_name
     image_tag = request.image_tag
     export_port = request.export_port
 
     # 確認 Image Name 格式
-    if not ml_serving_pod_server_image_name:
+    if not image_name:
         raise HTTPException(status_code=400, detail="Image Name is required.")
-    if "/" in ml_serving_pod_server_image_name or ":" in ml_serving_pod_server_image_name:
+    if ":" in image_name:
         raise HTTPException(status_code=400, detail="Invalid Image Name.")
     
     # 拼接 Image 完整名稱
-    full_image_name = f"harbor.pdc.tw/moa_ncu/{ml_serving_pod_server_image_name}:{image_tag}"
+    full_image_name = f"harbor.pdc.tw/{image_name}:{image_tag}"
 
     print("Image used for deployment:", full_image_name)
 
-    pod_name = f"ml-serving-{ml_serving_pod_server_image_name}-{uuid.uuid4().hex[:6]}"  # 生成隨機 Pod 名稱
+    # 替換掉不合法的字元
+    ml_serving_pod_name = sanitize_k8s_name(image_name)
+
+    # 生成合法的 Pod 名稱
+    pod_name = f"ml-serving-{ml_serving_pod_name}-{uuid.uuid4().hex[:6]}"  # 生成隨機 Pod 名稱
     # 1. 動態生成 PVC
     pvc_name = f"{pod_name}-pvc"
     pvc_manifest = {
