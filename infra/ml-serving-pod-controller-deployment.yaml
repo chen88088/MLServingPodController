@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-serving-pod-controller-server
+  namespace: ml-serving  # 建議指定 namespace，保持資源隔離
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ml-serving-pod-controller-server
+  template:
+    metadata:
+      labels:
+        app: ml-serving-pod-controller-server
+    spec:
+      serviceAccountName: ml-serving-sa  # 確保 API Server 也能控制 Kubernetes
+      containers:
+        - name: ml-serving-pod-controller-server
+          image: harbor.pdc.tw/moa_ncu/ml-serving-pod-controller:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: KUBERNETES_SERVICE_HOST
+              value: "kubernetes.default.svc"
+          livenessProbe:     # 確保 Pod 存活檢查
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:    # 確保 Pod 就緒檢查
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:         # 限制 CPU 與 Memory
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      imagePullSecrets:     # 如果 Harbor 需要認證
+        - name: harbor-secret
+      restartPolicy: Always
+

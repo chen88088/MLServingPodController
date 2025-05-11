@@ -2,3 +2,8 @@
 
 test_controller/ENVTestMLServingPod
 
+test_mlserving/ENVTestMLServingPod
+
+test_testpod/ENVTestMLServingPod
+
+
