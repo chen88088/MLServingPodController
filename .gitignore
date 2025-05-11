@@ -9,3 +9,8 @@ test_testpod/ENVTestMLServingPod
 test_registry/test_service_register/
 
 
+# 忽略所有虛擬環境
+**/ENVTestMLServingPod/
+**/test_service_register/
+__pycache__/
+*.pyc
