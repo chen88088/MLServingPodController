@@ -6,4 +6,6 @@ test_mlserving/ENVTestMLServingPod
 
 test_testpod/ENVTestMLServingPod
 
+test_registry/test_service_register/
+
 
