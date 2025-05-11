@@ -32,11 +32,12 @@ def sanitize_k8s_name(name: str) -> str:
     name = re.sub(r"-+", "-", name).strip("-")  # 避免多個 dash 或首尾 dash
     return name
 
-def generate_safe_name(base_name: str, prefix: str, suffix: str = "", rand_len: int = 6, max_len: int = 63):
+def generate_safe_name(base_name: str, prefix: str, suffix: str = "", rand_len: int = 6, max_len: int = 45):
     """
-    安全產生 pod/service name，避免超過 63 字元
+    安全產生 pod/service name，避免超過 63  字元
     base_name: 來源名稱（如 image）
     prefix/suffix: 前綴/後綴字串
+    set max_len =45 for pod name, 45+4 for pvc & svc
     """
     base = base_name.split("/")[-1].replace("_", "-").replace(".", "-")
     rand_str = uuid.uuid4().hex[:rand_len]
@@ -108,6 +109,7 @@ def create_pod(request: PodCreateRequest):
 
     # 1. 動態生成 PVC
     pvc_name = f"{pod_name}-pvc"
+
     pvc_manifest = {
         "apiVersion": "v1",
         "kind": "PersistentVolumeClaim",
@@ -208,7 +210,7 @@ def create_pod(request: PodCreateRequest):
         raise HTTPException(status_code=500, detail="Pod did not reach Running state in time.")
     
     # 3.  create svc
-    service_name = generate_safe_name(image_name, prefix="mlsvc")
+    service_name = f"{pod_name}-svc"
     service_manifest = {
         "apiVersion": "v1",
         "kind": "Service",
@@ -224,7 +226,7 @@ def create_pod(request: PodCreateRequest):
                 {
                     "protocol": "TCP",
                     "port": export_port,
-                    "targetPort": "http"
+                    "targetPort": export_port  
                 }
             ]
         }
@@ -372,3 +374,87 @@ async def release_service(assigned_service_instance_id: str, request: AllocateEx
     # 解除鎖定
     redis_lock.delete(f"locked_dag_{assigned_service_instance_id}")
     return {"status": "Unlocked", "message": f"Service Instance : {assigned_service_instance_id} 已釋放，由 {dag_unique_id} 釋放"}
+
+
+###########################
+
+
+class CustomImageJobRequest(BaseModel):
+    execution_id: str
+    image_name: str  # e.g., "myteam/exp-image:v1"
+    env: dict = {}   # 可選：MLFLOW_TRACKING_URI、MINIO_ENDPOINT 等
+
+# 初始化 Kubernetes API client
+def init_k8s_batch_client():
+    config.load_incluster_config()  # for in-cluster use
+    return client.BatchV1Api()
+
+def generate_safe_job_name(execution_id: str, prefix="custom-job"):
+    raw_name = f"{prefix}-{execution_id}-{uuid.uuid4().hex[:6]}"
+    safe = re.sub(r'[^a-z0-9\-]+', '', raw_name.lower().replace('_', '-'))
+    if len(safe) > 63:
+        hash_suffix = hashlib.sha1(safe.encode()).hexdigest()[:6]
+        safe = f"{safe[:56]}-{hash_suffix}"
+    return safe
+
+
+@app.post("/job/execute_custom_image")
+def run_custom_image_job(req: CustomImageJobRequest):
+    batch_v1 = init_k8s_batch_client()
+    namespace = "ml-serving"
+
+    if ":" not in req.image_name:
+        raise HTTPException(status_code=400, detail="Image name must include a tag (e.g., rss-job:latest)")
+
+    # 處理 job 名稱合法性與長度限制
+    raw_job_name = f"job-{req.execution_id.lower()}"
+    job_name = re.sub(r"[^a-z0-9\-]", "-", raw_job_name)
+    if len(job_name) > 63:
+        job_name = f"{job_name[:56]}-{hashlib.sha1(job_name.encode()).hexdigest()[:6]}"
+
+    # 環境變數轉換
+    env_list = [{"name": k, "value": str(v)} for k, v in req.env.items() if v is not None]
+    env_list.append({"name": "EXECUTION_ID", "value": req.execution_id})
+
+    # 是否使用 GPU
+    use_gpu = getattr(req, "use_gpu", False)
+
+    container_spec = {
+        "name": "job-container",
+        "image": f"harbor.pdc.tw/{req.image_name}",
+        "imagePullPolicy": "Always",
+        "env": env_list
+    }
+    if use_gpu:
+        container_spec["resources"] = {"limits": {"nvidia.com/gpu": "1"}}
+
+    # 組 Job manifest
+    job_manifest = {
+        "apiVersion": "batch/v1",
+        "kind": "Job",
+        "metadata": {
+            "name": job_name,
+            "namespace": namespace
+        },
+        "spec": {
+            "ttlSecondsAfterFinished": 300,
+            "backoffLimit": 1,
+            "template": {
+                "spec": {
+                    "restartPolicy": "Never",
+                    "containers": [container_spec]
+                }
+            }
+        }
+    }
+
+    try:
+        batch_v1.create_namespaced_job(namespace=namespace, body=job_manifest)
+        return {
+            "status": "started",
+            "job_name": job_name,
+            "image": req.image_name,
+            "namespace": namespace
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Create job failed: {str(e)}")
