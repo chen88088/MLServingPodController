@@ -77,7 +77,7 @@ class AllocateExternalServiceRequest(BaseModel):
 
 @app.get("/health")
 def health_check():
-    return {"status": "CONTROLLER SERVER is running!!!!!"}
+    return {"status": "CONTROLLER SERVER is deployed  sucessfully by Argo and is running!!!!!"}
 
 # 創建 Pod
 @app.post("/create_pod")
@@ -458,3 +458,6 @@ def run_custom_image_job(req: CustomImageJobRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Create job failed: {str(e)}")
+    
+
+

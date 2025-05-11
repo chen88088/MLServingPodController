@@ -16,7 +16,7 @@ spec:
       serviceAccountName: ml-serving-sa  # 確保 API Server 也能控制 Kubernetes
       containers:
         - name: ml-serving-pod-controller-server
-          image: harbor.pdc.tw/moa_ncu/ml-serving-pod-controller:latest
+          image: harbor.pdc.tw/moa_ncu/ml-serving-pod-controller:v1.1
           ports:
             - containerPort: 8000
           env:
